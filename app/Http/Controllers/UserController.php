@@ -3,14 +3,17 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse; // <<< ADDED THIS IMPORT
-
+use Illuminate\Http\JsonResponse;
+use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Hash;
+use App\Models\User; // Ensure the User model is accessible
 
 class UserController extends Controller
 {
     /**
      * Get the details of the currently authenticated user.
-     * This is used by the /api/user route secured by sanctum middleware.
+     * This is used by the /api/user and /api/me routes.
      *
      * @param  \Illuminate\Http\Request  $request
      * @return \Illuminate\Http\JsonResponse
@@ -18,63 +21,85 @@ class UserController extends Controller
     public function current(Request $request): JsonResponse
     {
         // The 'auth:sanctum' middleware ensures $request->user() is not null.
-        // It returns the entire User model object as JSON.
         return response()->json($request->user());
     }
     
     /**
-     * Display a listing of the resource.
+     * Update the profile information and optional profile picture of the authenticated user.
+     * This method handles the file upload.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\JsonResponse
      */
-    public function index()
+    public function updateProfile(Request $request): JsonResponse
     {
-        //
-    }
+        // 1. Get the authenticated user
+        $user = $request->user();
+        
+        try {
+            // 2. Validate incoming data
+            $validatedData = $request->validate([
+                'name' => 'required|string|max:255',
+                // Allow changing email only if it's unique (excluding the current user's email)
+                'email' => 'required|string|email|max:255|unique:users,email,'.$user->id,
+                // The image field is optional, accepts file uploads, and must be an image
+                'profile_picture' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', // Max 2MB
+                'password' => 'nullable|string|min:8|confirmed', // Optional password change
+            ]);
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
-    {
-        //
-    }
+            $updateData = [
+                'name' => $validatedData['name'],
+                'email' => $validatedData['email'],
+            ];
 
-    /**
-     * Store a newly created resource in storage.
-     */
-    public function store(Request $request)
-    {
-        //
-    }
+            // 3. Handle File Upload (Profile Picture)
+            if ($request->hasFile('profile_picture')) {
+                // Delete old profile picture if it exists
+                if ($user->profile_picture) {
+                    Storage::disk('public')->delete($user->profile_picture);
+                }
+                
+                // Store the new image in the 'public/profiles' directory
+                // The 'public' disk maps to storage/app/public, which must be symlinked
+                $path = $request->file('profile_picture')->store('profiles', 'public');
+                $updateData['profile_picture'] = $path;
+            }
 
-    /**
-     * Display the specified resource.
-     */
-    public function show(string $id)
-    {
-        //
-    }
+            // 4. Handle Password Change
+            if (!empty($validatedData['password'])) {
+                $updateData['password'] = Hash::make($validatedData['password']);
+            }
+            
+            // 5. Update the user model
+            $user->update($updateData);
 
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(string $id)
-    {
-        //
-    }
+            // 6. Return the updated user data
+            return response()->json([
+                'message' => 'Profile updated successfully.',
+                'user' => $user
+            ], 200);
 
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, string $id)
-    {
-        //
+        } catch (ValidationException $e) {
+            return response()->json([
+                'message' => 'Validation failed.',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            \Log::error('Profile update failed for user ID ' . $user->id . ': ' . $e->getMessage());
+            return response()->json([
+                'message' => 'An error occurred during profile update.',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
+    
+    // --- Unused default resource methods below (kept for completeness) ---
 
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(string $id)
-    {
-        //
-    }
+    public function index() { /* ... */ }
+    public function create() { /* ... */ }
+    public function store(Request $request) { /* ... */ }
+    public function show(string $id) { /* ... */ }
+    public function edit(string $id) { /* ... */ }
+    public function update(Request $request, string $id) { /* ... */ }
+    public function destroy(string $id) { /* ... */ }
 }
