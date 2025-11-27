@@ -4,57 +4,34 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Barryvdh\DomPDF\Facade\Pdf;
-use SimpleSoftware\QrCode\Facades\QrCode;
-use Carbon\Carbon;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 class CertificateController extends Controller
 {
-    public function generateCertificate($resolutionId)
+    /**
+     * Receives HTML content from Vue and generates a PDF certificate.
+     */
+    public function generateCertificate(Request $request)
     {
-        // 1. Fetch Mock Data (Replace with your actual Eloquent query)
-        // In a real application, you would fetch:
-        // $resolution = MisconductResolution::with('student')->findOrFail($resolutionId);
-        $resolution = (object)[
-            'id' => $resolutionId,
-            'student_name' => 'Alexander J. Hamilton',
-            'status_description' => 'Completion of mandatory counseling and disciplinary action.',
-            'verification_code' => "CERT-RES{$resolutionId}-" . rand(100, 999),
-        ];
+        // 1. Validation
+        $validator = Validator::make($request->all(), [
+            'studentId' => 'required|integer',
+            'htmlContent' => 'required|string',
+            'fileName' => 'required|string|max:100',
+        ]);
 
-        // 2. Generate QR Code Data URI
-        // The QR code links to a verification endpoint (you should implement this)
-        $verificationLink = route('certificate.verify', ['code' => $resolution->verification_code]);
+        if ($validator->fails()) {
+            throw new ValidationException($validator);
+        }
         
-        $qrCodeDataUri = base64_encode(
-            QrCode::format('png')
-                ->size(150)
-                ->errorCorrection('H')
-                ->generate($verificationLink)
-        );
-        
-        // 3. Prepare Data for the Blade View
-        $data = [
-            'studentName' => $resolution->student_name,
-            'violationStatus' => $resolution->status_description,
-            'dateIssued' => Carbon::now()->format('F d, Y'),
-            'verificationCode' => $resolution->verification_code,
-            'qrCodeDataUri' => 'data:image/png;base64,' . $qrCodeDataUri,
-        ];
+        $htmlContent = $request->input('htmlContent');
+        $fileName = $request->input('fileName');
 
-        // 4. Generate and Stream the PDF
-        $pdf = Pdf::loadView('certificates.clearance', $data);
+        // 2. Generate the PDF from the raw HTML string
+        $pdf = Pdf::loadHtml($htmlContent);
 
-        $filename = str_replace(' ', '_', $resolution->student_name) . "_Clearance_{$resolution->id}.pdf";
-        
-        return $pdf->download($filename);
-    }
-
-    // You would implement a simple view here to verify the QR code's link
-    public function verifyCertificate($code)
-    {
-        // $resolution = MisconductResolution::where('verification_code', $code)->first();
-        // if ($resolution) { return view('verification.success', compact('resolution')); }
-        // return view('verification.failed');
-        return view('verification.status', ['code' => $code]);
+        // 3. Stream the PDF back to the browser/frontend as a blob
+        return $pdf->stream($fileName . '.pdf');
     }
 }

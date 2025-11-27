@@ -3,12 +3,11 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
-// ... (other controllers)
+use App\Http\Controllers\StudentController; // Added StudentController import
 use App\Http\Controllers\IncidentController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\CertificateController;
-// Ensure you have UserProfileController if you use it below
 use App\Http\Controllers\UserProfileController; 
 
 
@@ -26,11 +25,6 @@ Route::middleware('auth:sanctum')->group(function () {
     
     // Student API routes
     Route::resource('students', StudentController::class); // Using resource routing for simplicity
-    // Route::get('/students', [StudentController::class, 'index']);
-    // Route::post('/students', [StudentController::class, 'store']);
-    // Route::get('/students/{student}', [StudentController::class, 'show']);
-    // Route::put('/students/{student}', [StudentController::class, 'update']);
-    // Route::delete('/students/{student}', [StudentController::class, 'destroy']);
 
     // --- INCIDENT MANAGEMENT ROUTES (FULL CRUD) ---
     
@@ -43,9 +37,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/incidents/{incident}/status', [IncidentController::class, 'updateStatus']); 
     Route::delete('/incidents/{incident}', [IncidentController::class, 'destroy']);
 
-    // 🗑️ REMOVED: This specific route is no longer needed/recommended
-    // Route::get('/incidents/user/{filerId}', [IncidentController::class, 'userIndex']); 
-
     // Dedicated route to update ONLY the final action taken by the administrator
     Route::patch('/incidents/{incident}/action', [IncidentController::class, 'updateActionTaken']);
 
@@ -54,4 +45,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('/profile/picture', [UserProfileController::class, 'updateProfilePicture']);
     Route::get('/me', [AuthController::class, 'me']);
+    
+});
+
+// Route protected by authentication (e.g., Sanctum) and our custom 'admin' middleware.
+Route::middleware(['auth:sanctum', 'admin'])->group(function () {
+    // POST route to receive HTML content and generate PDF
+    Route::post('/certificate/generate', [CertificateController::class, 'generateCertificate'])
+        ->name('certificate.generate');
 });
