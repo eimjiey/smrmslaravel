@@ -1,17 +1,21 @@
 <?php
-// app/Models/Incident.php
 
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo; // <-- ADDED
 
 class Incident extends Model
 {
     use HasFactory;
-    
-    // Add all fields that are allowed to be mass-assigned from the form data
+
+    /**
+     * The attributes that are mass assignable.
+     */
     protected $fillable = [
+        // 🎯 NEW: Added filer_id so the store method can save it
+        'filer_id', 
         'student_id',
         'full_name',
         'program',
@@ -23,6 +27,15 @@ class Incident extends Model
         'offense_category',
         'specific_offense',
         'description',
-        'status', // Optionally include if you want to set it on creation
+        'status',
+        // Fields for optimization
+        'recommendation', 
+        'action_taken',
     ];
+
+    // 🎯 NEW: Define the inverse relationship (Incident belongs to a Filer/User)
+    public function filer(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'filer_id');
+    }
 }

@@ -6,8 +6,6 @@ use Illuminate\Http\Request;
 use App\Models\Incident;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Auth;
-use App\Models\User; // <-- ADDED: For role check (though Auth::user() usually suffices)
 
 class IncidentController extends Controller
 {
@@ -34,32 +32,14 @@ class IncidentController extends Controller
     ];
 
     /**
-     * 🎯 NEW LOGIC: Display a listing of incident reports.
-     * Filters results based on the authenticated user's role:
-     * - 'admin': sees all incidents.
-     * - other roles: see only incidents they filed (filer_id).
+     * Display a listing of all incident reports.
      */
     public function index()
     {
-        $user = Auth::user();
-        
-        // Start with a base query
-        $query = Incident::orderBy('id', 'desc');
-
-        // Apply filtering unless the user is an 'admin'
-        if ($user && $user->role !== 'admin') {
-            // Use the relationship to filter securely by the logged-in user's ID
-            $incidents = $user->incidents()->orderBy('id', 'desc')->get();
-        } else {
-            // Admin or no user (though middleware should prevent no user access)
-            $incidents = $query->get();
-        }
-
+        $incidents = Incident::orderBy('id', 'desc')->get();
         return response()->json($incidents);
     }
-    
-    // 🗑️ REMOVED: The old `userIndex($filerId)` method is removed, as `index()` handles user filtering securely.
-    
+
     /**
      * Display the specified incident report.
      */
@@ -69,13 +49,6 @@ class IncidentController extends Controller
         if (!$incident) {
             return response()->json(['message' => 'Incident not found for viewing.'], 404);
         }
-        
-        // 🛡️ SECURITY CHECK (Optional but recommended for single view)
-        $user = Auth::user();
-        if ($user->role !== 'admin' && $incident->filer_id !== $user->id) {
-            return response()->json(['message' => 'Unauthorized access to incident report.'], 403);
-        }
-        
         return response()->json($incident);
     }
     
@@ -161,8 +134,6 @@ class IncidentController extends Controller
 
             // Create the incident record
             $incident = Incident::create([
-                // 🎯 KEY CHANGE: Saving the authenticated user's ID
-                'filer_id' => Auth::id(), 
                 'student_id' => $validatedData['studentId'],
                 'full_name' => $validatedData['fullName'],
                 'program' => $validatedData['program'],
@@ -200,12 +171,6 @@ class IncidentController extends Controller
     public function update(Request $request, Incident $incident)
     {
         try {
-            // 🛡️ SECURITY CHECK: Only Admin or the Filer can update (you can customize this)
-            $user = Auth::user();
-            if ($user->role !== 'admin' && $incident->filer_id !== $user->id) {
-                return response()->json(['message' => 'Unauthorized action.'], 403);
-            }
-            
             $validatedData = $request->validate([
                 'student_id' => ['required', 'string', 'max:7', 'regex:/^\d{2}-\d{4}$/'], 
                 'full_name' => 'required|string|max:255',
@@ -251,11 +216,11 @@ class IncidentController extends Controller
             ], 200);
 
         } catch (ValidationException $e) {
-            Log::error('Validation Failed during full update: ' . json_encode($e->errors()));
-            return response()->json([
-                'message' => 'Validation Failed: One or more fields are invalid.',
-                'errors' => $e->errors() 
-            ], 422);
+             Log::error('Validation Failed during full update: ' . json_encode($e->errors()));
+             return response()->json([
+                 'message' => 'Validation Failed: One or more fields are invalid.',
+                 'errors' => $e->errors() 
+             ], 422);
         } catch (\Exception $e) {
             Log::error('Full update general error: ' . $e->getMessage());
             return response()->json([
@@ -270,11 +235,6 @@ class IncidentController extends Controller
      */
     public function updateStatus(Request $request, Incident $incident)
     {
-        // 🛡️ SECURITY CHECK: Typically only Admins should update status
-        if (Auth::user()->role !== 'admin') {
-            return response()->json(['message' => 'Unauthorized to update incident status.'], 403);
-        }
-        
         $validated = $request->validate([
             'status' => 'required|string|in:Pending,Resolved,Under Review,Closed',
         ]);
@@ -289,15 +249,10 @@ class IncidentController extends Controller
     }
     
     /**
-     * Update only the action taken for a specific incident.
+     * Update only the action taken for a specific incident (via PATCH /incidents/{incident}/action).
      */
     public function updateActionTaken(Request $request, Incident $incident)
     {
-        // 🛡️ SECURITY CHECK: Typically only Admins should take action
-        if (Auth::user()->role !== 'admin') {
-            return response()->json(['message' => 'Unauthorized to record action taken.'], 403);
-        }
-        
         try {
             $validated = $request->validate([
                 'action_taken' => 'required|string|max:255',
@@ -332,12 +287,6 @@ class IncidentController extends Controller
      */
     public function destroy(Incident $incident)
     {
-        // 🛡️ SECURITY CHECK: Only Admins or the Filer can delete
-        $user = Auth::user();
-        if ($user->role !== 'admin' && $incident->filer_id !== $user->id) {
-            return response()->json(['message' => 'Unauthorized to delete this incident.'], 403);
-        }
-
         try {
             $incidentId = $incident->id;
             $incident->delete();
