@@ -4,10 +4,11 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Incident;
+use App\Models\Student; 
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
-use App\Models\User; // Kept for clarity
+use App\Models\User; 
 
 class IncidentController extends Controller
 {
@@ -20,20 +21,24 @@ class IncidentController extends Controller
      * Define a simple rule matrix (Optimization Logic).
      */
     const RECOMMENDATION_MATRIX = [
-        'Minor Offense' => [
-            1 => 'Verbal Warning',
-            2 => 'Written Warning and Parent Notification',
-            3 => 'Mandatory Counseling Session',
-            4 => '1-Day Suspension',
-        ],
-        'Major Offense' => [
-            1 => '3-Day Suspension and Parent Conference',
-            2 => 'Formal Behavioral Contract and Suspension',
-            3 => 'Recommendation for Expulsion',
-        ],
-    ];
+    'Minor Offense' => [
+        // Corresponds to Section 3.1.1
+        1 => 'Reprimand and apology, promissory letter, restitution, summons for parent/s guardian/s.',
+        // Corresponds to Section 3.1.2
+        2 => 'Suspension from one (1) to four (4) days, community service as determined by the Office of Student Affairs and Services.',
+    ],
+    'Major Offense' => [
+        // Corresponds to Section 3.2.1
+        1 => 'Suspension from five (5) to ten (10) days or Community Service, as determined by the Office of Student Affairs and Services.',
+        // Corresponds to Section 3.2.2
+        2 => 'Suspension from eleven (11) to fifteen (15) days.',
+        // Corresponds to Section 3.2.3
+        3 => 'Suspension up to forty-five (45) calendar days to dismissal depending upon the gravity of the offense after due process.',
+    ],
+];
 
-    // --- Core API Methods ---
+    // --- Core API Methods (omitted index, show, update, destroy, updateStatus, updateActionTaken for brevity) ---
+    // ... index(), show(), update(), updateStatus(), updateActionTaken(), destroy() ...
 
     /**
      * Display a listing of incident reports.
@@ -74,85 +79,11 @@ class IncidentController extends Controller
         }
         
         // 🛡️ SECURITY CHECK 2 (Authorization Fix):
-        // Uses non-strict comparison (!=) to avoid 403 errors caused by type mismatch 
-        // between the database (int) and the token payload (string).
         if ($user->role != 'admin' && $incident->filer_id != $user->id) {
             return response()->json(['message' => 'Unauthorized access to incident report.'], 403);
         }
         
         return response()->json($incident);
-    }
-    
-    /**
-     * Store a newly created incident report.
-     */
-    public function store(Request $request)
-    {
-        // 🛡️ SECURITY CHECK: Must be authenticated
-        if (!Auth::check()) {
-            return response()->json(['message' => 'Unauthenticated.'], 401);
-        }
-
-        try {
-            $validatedData = $request->validate([
-                'studentId' => ['required', 'string', 'max:7', 'regex:/^\d{2}-\d{4}$/'], 
-                'fullName' => 'required|string|max:255',
-                'program' => ['nullable', 'string', 'max:255', 'in:' . implode(',', self::VALID_PROGRAMS)],
-                'yearLevel' => 'required|string|max:50',
-                'section' => 'nullable|string|max:50',
-                
-                // Date/Time validation rules
-                'dateOfIncident' => ['required', 'date', function ($attribute, $value, $fail) {
-                    if (date('w', strtotime($value)) == 0) { $fail('The date of incident cannot be a Sunday.'); }
-                }],
-                'timeOfIncident' => ['required', 'date_format:H:i', function ($attribute, $value, $fail) {
-                    $start = strtotime('07:00'); $end = strtotime('17:00'); $inputTime = strtotime($value);
-                    if ($inputTime < $start || $inputTime > $end) { $fail('The time of incident must be between 7:00 AM and 5:00 PM.'); }
-                }],
-                
-                'location' => 'required|string|max:255',
-                'offenseCategory' => 'required|string|in:Minor Offense,Major Offense',
-                'specificOffense' => 'required|string|max:255',
-                'description' => 'required|string',
-                'actionTaken' => 'nullable|string|max:255', 
-            ]);
-
-            $recommendation = $this->getDisciplinaryRecommendation(
-                $validatedData['studentId'], 
-                $validatedData['offenseCategory']
-            );
-
-            // Create the incident record with filer_id
-            $incident = Incident::create([
-                'filer_id' => Auth::id(), // Saves the current user's ID
-                'student_id' => $validatedData['studentId'],
-                'full_name' => $validatedData['fullName'],
-                'program' => $validatedData['program'],
-                'year_level' => $validatedData['yearLevel'],
-                'section' => $validatedData['section'],
-                'date_of_incident' => $validatedData['dateOfIncident'],
-                'time_of_incident' => $validatedData['timeOfIncident'],
-                'location' => $validatedData['location'],
-                'offense_category' => $validatedData['offenseCategory'],
-                'specific_offense' => $validatedData['specificOffense'],
-                'description' => $validatedData['description'],
-                'status' => 'Pending',
-                'recommendation' => $recommendation, 
-                'action_taken' => $validatedData['actionTaken'] ?? null, 
-            ]);
-            
-            return response()->json([
-                'message' => 'Incident report filed successfully.', 
-                'incident' => $incident, 
-                'recommendation' => $recommendation 
-            ], 201);
-            
-        } catch (ValidationException $e) {
-            return response()->json(['message' => 'The given data was invalid.', 'errors' => $e->errors()], 422);
-        } catch (\Exception $e) {
-            Log::error('Store Incident Error: ' . $e->getMessage());
-            return response()->json(['message' => 'An error occurred while filing the report.', 'error' => $e->getMessage()], 500);
-        }
     }
     
     /**
@@ -173,8 +104,8 @@ class IncidentController extends Controller
             $validatedData = $request->validate([ 
                 'student_id' => ['required', 'string', 'max:7', 'regex:/^\d{2}-\d{4}$/'], 
                 'full_name' => 'required|string|max:255',
-                // ... all other fields needed for update ...
                 'status' => 'nullable|string|in:Pending,Resolved,Under Review,Closed',
+                // ... all other fields needed for update ...
             ]);
 
             $incident->update($validatedData);
@@ -259,6 +190,133 @@ class IncidentController extends Controller
             return response()->json(['message' => "Incident report ID {$incidentId} deleted successfully."], 200);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Failed to delete the incident report.', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Store a newly created incident report.
+     */
+    public function store(Request $request)
+    {
+        // 🛡️ SECURITY CHECK: Must be authenticated
+        if (!Auth::check()) {
+            return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+
+        try {
+            $validatedData = $request->validate([
+                'studentId' => ['required', 'string', 'max:7', 'regex:/^\d{2}-\d{4}$/'], 
+                'fullName' => 'required|string|max:255',
+                'program' => ['nullable', 'string', 'max:255', 'in:' . implode(',', self::VALID_PROGRAMS)],
+                'yearLevel' => 'required|string|max:50',
+                'section' => 'nullable|string|max:50',
+                
+                // Date/Time validation rules
+                'dateOfIncident' => ['required', 'date', function ($attribute, $value, $fail) {
+                    if (date('w', strtotime($value)) == 0) { $fail('The date of incident cannot be a Sunday.'); }
+                }],
+                'timeOfIncident' => ['required', 'date_format:H:i', function ($attribute, $value, $fail) {
+                    $start = strtotime('07:00'); $end = strtotime('17:00'); $inputTime = strtotime($value);
+                    if ($inputTime < $start || $inputTime > $end) { $fail('The time of incident must be between 7:00 AM and 5:00 PM.'); }
+                }],
+                
+                'location' => 'required|string|max:255',
+                'offenseCategory' => 'required|string|in:Minor Offense,Major Offense',
+                'specificOffense' => 'required|string|max:255',
+                'description' => 'required|string',
+                'actionTaken' => 'nullable|string|max:255', 
+            ]);
+
+            // --- 1. Student Existence Check ---
+            $studentIdInput = $validatedData['studentId'];
+            $student = Student::where('student_number', $studentIdInput)->first();
+            
+            if (!$student) {
+                return response()->json([
+                    'message' => 'The given data was invalid.', 
+                    'errors' => [
+                        'studentId' => ["The student with ID **{$studentIdInput}** does not exist in the record."]
+                    ]
+                ], 422);
+            }
+
+            // --- 2. Data Consistency Check (Verification) ---
+            $verificationErrors = [];
+            
+            // a. Full Name Verification
+            // Normalize names: Remove extra spaces and compare in a consistent format (e.g., First Last)
+            $dbFullName = trim(
+                $student->first_name . ' ' . 
+                $student->last_name
+            );
+            $inputFullName = trim($validatedData['fullName']);
+            
+            if (strcasecmp($inputFullName, $dbFullName) !== 0) {
+                $verificationErrors['fullName'][] = "The submitted name ('{$inputFullName}') does not match the name on record ('{$dbFullName}') for this Student ID.";
+            }
+
+            // b. Program Verification
+            if ($validatedData['program'] && strcasecmp($validatedData['program'], $student->program) !== 0) {
+                 $verificationErrors['program'][] = "The submitted program ('{$validatedData['program']}') does not match the program on record ('{$student->program}').";
+            }
+            
+            // c. Year Level Verification
+            if (strcasecmp($validatedData['yearLevel'], $student->year_level) !== 0) {
+                 $verificationErrors['yearLevel'][] = "The submitted year level ('{$validatedData['yearLevel']}') does not match the year level on record ('{$student->year_level}').";
+            }
+            
+            // d. Section Verification (Optional field, check only if provided)
+            if ($validatedData['section'] && strcasecmp($validatedData['section'], $student->section) !== 0) {
+                 $verificationErrors['section'][] = "The submitted section ('{$validatedData['section']}') does not match the section on record ('{$student->section}').";
+            }
+
+            // --- 3. Return Mismatch Errors (if any) ---
+            if (!empty($verificationErrors)) {
+                // Merge all verification errors into the standard 422 response
+                return response()->json([
+                    'message' => 'Data verification failed. Please check the student details.',
+                    'errors' => $verificationErrors
+                ], 422);
+            }
+            
+            // --- 4. Proceed with Incident Creation ---
+            
+            $recommendation = $this->getDisciplinaryRecommendation(
+                $studentIdInput, 
+                $validatedData['offenseCategory']
+            );
+
+            // Create the incident record with filer_id
+            $incident = Incident::create([
+                'filer_id' => Auth::id(), 
+                'student_id' => $studentIdInput, 
+                'full_name' => $validatedData['fullName'],
+                'program' => $validatedData['program'],
+                'year_level' => $validatedData['yearLevel'],
+                'section' => $validatedData['section'],
+                'date_of_incident' => $validatedData['dateOfIncident'],
+                'time_of_incident' => $validatedData['timeOfIncident'],
+                'location' => $validatedData['location'],
+                'offense_category' => $validatedData['offenseCategory'],
+                'specific_offense' => $validatedData['specificOffense'],
+                'description' => $validatedData['description'],
+                'status' => 'Pending',
+                'recommendation' => $recommendation, 
+                'action_taken' => $validatedData['actionTaken'] ?? null, 
+            ]);
+            
+            return response()->json([
+                'message' => 'Incident report filed successfully.', 
+                'incident' => $incident, 
+                'recommendation' => $recommendation 
+            ], 201);
+            
+        } catch (ValidationException $e) {
+            // Catches standard validation errors (e.g., missing fields, bad format)
+            return response()->json(['message' => 'The given data was invalid.', 'errors' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            Log::error('Store Incident Error: ' . $e->getMessage());
+            return response()->json(['message' => 'An error occurred while filing the report.', 'error' => $e->getMessage()], 500);
         }
     }
 

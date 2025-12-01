@@ -9,13 +9,13 @@ class Student extends Model
 {
     use HasFactory;
 
-    // Table name (optional if it matches plural of model)
+    // Table name
     protected $table = 'students';
 
-    // Primary key
+    // Primary key (This is the auto-incrementing integer ID)
     protected $primaryKey = 'student_id';
 
-    // Auto-increment (true since you used $table->id())
+    // Auto-increment 
     public $incrementing = true;
 
     // Primary key type
@@ -23,7 +23,7 @@ class Student extends Model
 
     // Mass assignable fields
     protected $fillable = [
-        'student_number',
+        'student_number', // The unique ID used for lookups (e.g., 23-0001)
         'first_name',
         'last_name',
         'middle_name',
@@ -39,9 +39,15 @@ class Student extends Model
         'guardian_contact',
     ];
 
-    // Relationships (optional: if you link incidents, etc.)
+    /**
+     * Get the incident reports associated with the student.
+     */
     public function incidents()
     {
-        return $this->hasMany(Incident::class, 'student_id', 'student_id');
+        // NOTE: If the 'student_id' column in the incidents table holds the
+        // 'student_number' (e.g., 23-0001) and not the primary key 'id', 
+        // you should adjust the foreign key relationship if needed.
+        // Based on your Incident model using 'student_id' as the unique number:
+        return $this->hasMany(Incident::class, 'student_id', 'student_number');
     }
 }
