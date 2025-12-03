@@ -12,27 +12,18 @@ use App\Models\User;
 
 class IncidentController extends Controller
 {
-    // Define the list of valid programs for dropdown validation
     const VALID_PROGRAMS = [
         'BSIT', 'BSCS', 'BSDSA', 'BLIS', 'BSIS', 
     ];
 
-    /**
-     * Define a simple rule matrix (Optimization Logic).
-     */
     const RECOMMENDATION_MATRIX = [
     'Minor Offense' => [
-        // Corresponds to Section 3.1.1
         1 => 'Reprimand and apology, promissory letter, restitution, summons for parent/s guardian/s.',
-        // Corresponds to Section 3.1.2
         2 => 'Suspension from one (1) to four (4) days, community service as determined by the Office of Student Affairs and Services.',
     ],
     'Major Offense' => [
-        // Corresponds to Section 3.2.1
         1 => 'Suspension from five (5) to ten (10) days or Community Service, as determined by the Office of Student Affairs and Services.',
-        // Corresponds to Section 3.2.2
         2 => 'Suspension from eleven (11) to fifteen (15) days.',
-        // Corresponds to Section 3.2.3
         3 => 'Suspension up to forty-five (45) calendar days to dismissal depending upon the gravity of the offense after due process.',
     ],
 ];

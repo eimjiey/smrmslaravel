@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::create('students', function (Blueprint $table) {
             $table->id('student_id'); // Primary Key
-            $table->string('student_number', 7)->unique(); 
+            $table->string('student_number', 10)->unique(); 
             $table->string('first_name', 100);
             $table->string('last_name', 100);
             $table->string('middle_name', 100)->nullable();

@@ -19,5 +19,8 @@ class DatabaseSeeder extends Seeder
         // TODO: Create StudentsSeeder and IncidentsSeeder if needed
         // $this->call(StudentsSeeder::class);
         // $this->call(IncidentsSeeder::class);
+        $this->call(StudentsSeeder::class);
+        $this->call([IncidentsSeeder::class,]);
+
     }
 }
