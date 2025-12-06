@@ -10,9 +10,17 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\CertificateController;
 use App\Http\Controllers\UserProfileController;
 
-// --- Authentication Routes (Public) ---
+// --- Public Routes (No Authentication Required) ---
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
+
+// --- Public Access Routes for Certificates ---
+// NOTE: These routes are moved to web.php to avoid conflicts and ensure proper handling
+// Route::get('/certificates/download/{id}', [CertificateController::class, 'download'])
+//     ->name('certificates.download'); 
+
+// Route::get('/certificates/verify/{certificate_number}', [CertificateController::class, 'verify'])
+//     ->name('certificates.verify');
 
 // --- Authenticated Routes (Requires Bearer Token) ---
 Route::middleware('auth:sanctum')->group(function () {
@@ -21,6 +29,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', [UserController::class, 'current']);
     Route::get('/me', [UserController::class, 'current']);
     Route::post('/user/profile', [UserController::class, 'updateProfile']);
+    Route::post('/profile/picture', [UserProfileController::class, 'updateProfilePicture']);
 
     // Student API routes
     Route::resource('students', StudentController::class);
@@ -32,19 +41,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('/incidents/{incident}', [IncidentController::class, 'update']);
     Route::put('/incidents/{incident}/status', [IncidentController::class, 'updateStatus']);
     Route::delete('/incidents/{incident}', [IncidentController::class, 'destroy']);
-
-    // Update final action taken by admin
     Route::patch('/incidents/{incident}/action', [IncidentController::class, 'updateActionTaken']);
 
     // Dashboard Stats Route
     Route::get('/admin/stats', [DashboardController::class, 'getStats']);
 
-    Route::post('/profile/picture', [UserProfileController::class, 'updateProfilePicture']);
-    Route::get('/me', [AuthController::class, 'me']);
-
-    // Certificate create route
+    // Certificate create route (This API endpoint MUST be protected)
     Route::post('/certificates', [CertificateController::class, 'store']);
 });
-
-// NOTE: Download + Verify routes belong in routes/web.php, not here.
-// (You already removed them)

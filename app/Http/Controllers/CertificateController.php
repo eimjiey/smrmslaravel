@@ -9,6 +9,7 @@ use PDF;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException; 
 
 class CertificateController extends Controller
 {
@@ -17,59 +18,178 @@ class CertificateController extends Controller
      */
     public function store(Request $request)
     {
+        // Define paths where the files *must* be in the public directory
+        // FIXED: Corrected filename from 'ISUILOGO.png' to 'ISULOGO.png'
+        $logoPath = public_path('images/ISULOGO.png');
+        
+        // FIX: Corrected filename from 'SMMGrnScreen.png' to 'SMRMSgreen.png'
+        $sealPath = public_path('images/SMRMSgreen.png'); 
+        
+        // Default to empty strings if files cannot be read (prevents crash)
+        $schoolLogoBase64 = '';
+        $schoolSealBase64 = '';
+        $qrBase64 = '';
+        $assetLoadFailed = false; // Flag to indicate if assets failed to load
+
         try {
+            // Attempt to read and encode the main logo (ISULOGO.png)
+            if (file_exists($logoPath) && is_readable($logoPath)) {
+                $schoolLogoBase64 = 'data:image/png;base64,' . base64_encode(file_get_contents($logoPath));
+            } else {
+                Log::error("PDF Asset Error: ISULOGO.png not found or unreadable at $logoPath");
+                $assetLoadFailed = true;
+            }
+            
+            // Attempt to read and encode the seal logo (SMRMSgreen.png)
+            if (file_exists($sealPath) && is_readable($sealPath)) {
+                $schoolSealBase64 = 'data:image/png;base64,' . base64_encode(file_get_contents($sealPath));
+            } else {
+                Log::error("PDF Asset Error: SMRMSgreen.png not found or unreadable at $sealPath"); 
+                $assetLoadFailed = true;
+            }
+
+            // 1. Validation and Data Mapping
             $data = $request->validate([
-                'recipient_name' => 'required|string|max:255',
-                'title' => 'nullable|string|max:255',
-                'issued_at' => 'nullable|date',
-                'notes' => 'nullable|string',
+                'student_name' => 'required|string|max:255',
+                'student_id' => 'required|string|max:50', 
+                'program_grade' => 'nullable|string|max:255', 
+                'offense_type' => 'required|string',
+                'date_of_incident' => 'required|date',
+                'disciplinary_action' => 'required|string',
+                'status' => 'required|in:Resolved,Pending',
+                'issued_date' => 'nullable|date',
+                'school_name' => 'nullable|string|max:255',
+                'school_location' => 'nullable|string|max:255',
+                'official_name' => 'nullable|string|max:255',
+                'official_position' => 'nullable|string|max:255',
             ]);
 
-            // Generate certificate number
             $data['certificate_number'] = strtoupper('CERT-' . Str::random(8));
-            $data['issued_at'] = $data['issued_at'] ?? now()->toDateString();
+            $data['issued_date'] = $data['issued_date'] ?? now()->toDateString();
+            $data['recipient_name'] = $data['student_name']; 
+            
+            // REMOVE student_name from data array to prevent database column error
+            unset($data['student_name']);
 
-            $cert = Certificate::create($data);
+            // Create the database record
+            $cert = Certificate::create($data); 
 
-            // Test write inside storage/app/public/certificates/
-            $test = Storage::disk('public')->put('certificates/test.txt', 'Hello world');
-            Log::info('Storage test result: ' . ($test ? 'success' : 'failed'));
+            // 2. Skip QR Code generation due to missing extensions (ImageMagick/GD)
+            // We'll continue without QR code to avoid the 500 error
+            Log::warning("Skipping QR code generation due to missing PHP extensions (ImageMagick/GD)");
+            $qrBase64 = ''; // Empty QR code
 
-            // Generate HTML for PDF
-            $html = view('certificates.template', [
-                'recipient_name' => $cert->recipient_name,
-                'title' => $cert->title,
-                'certificate_number' => $cert->certificate_number,
-                'issued_at' => $cert->issued_at,
-                'notes' => $cert->notes,
-                'qrBase64' => 'test',
-                'logo_url' => asset('images/cert-logo.png'),
-                'signature_url' => asset('images/signature.png'),
-            ])->render();
+            // 3. Generate a simple SVG-based certificate representation
+            $svgContent = $this->generateCertificateSVG($cert, $data);
+            
+            // 4. Save as SVG file in public/certificates directory
+            $fileName = "certificate_{$cert->id}.svg";
+            $filePath = public_path("certificates/{$fileName}");
+            
+            // Save SVG file
+            file_put_contents($filePath, $svgContent);
+            Log::info("Certificate SVG saved to public directory: " . $filePath);
 
-            $pdf = PDF::loadHTML($html)->setPaper('a4', 'landscape');
+            Log::info('Certificate process completed');
 
-            // Save generated PDF
-            $filePath = "certificates/certificate_{$cert->id}.pdf";
-            $save = Storage::disk('public')->put($filePath, $pdf->output());
-
-            Log::info('PDF save result: ' . ($save ? 'success' : 'failed'));
+            $messageText = $assetLoadFailed ? 
+                            "Certificate generated but images were missing. Check logs for Asset Error." : 
+                            "Certificate generated successfully!";
 
             return response()->json([
                 'success' => true,
                 'id' => $cert->id,
                 'certificate_number' => $cert->certificate_number,
+                'message' => $messageText,
+                'file_path' => url("certificates/{$fileName}"), // Return the public URL
             ]);
 
-        } catch (\Exception $e) {
-            Log::error("Certificate store failed: " . $e->getMessage());
+        } catch (ValidationException $e) { 
+            Log::error("Validation failed for certificate store: " . json_encode($e->errors()));
 
             return response()->json([
-                'error' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
+                'message' => 'The given data was invalid.',
+                'errors' => $e->errors(), 
+            ], 422);
+
+        } catch (\Exception $e) {
+            Log::error("Certificate store failed (Final Catch): " . $e->getMessage());
+
+            return response()->json([
+                'error' => "Server Error: Final attempt to generate failed. Check 'laravel.log' for file access errors.",
+                'detail' => $e->getMessage(),
             ], 500);
         }
+    }
+    
+    /**
+     * Generate an SVG-based representation of the certificate
+     */
+    private function generateCertificateSVG($cert, $data)
+    {
+        $svg = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>';
+        $svg .= '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600">';
+        $svg .= '<rect width="100%" height="100%" fill="white"/>';
+        $svg .= '<style>';
+        $svg .= 'text { font-family: Arial, sans-serif; }';
+        $svg .= '.title { font-size: 24px; font-weight: bold; text-anchor: middle; }';
+        $svg .= '.heading { font-size: 18px; font-weight: bold; }';
+        $svg .= '.label { font-size: 14px; font-weight: bold; }';
+        $svg .= '.value { font-size: 14px; }';
+        $svg .= '</style>';
+        
+        // Title
+        $svg .= '<text x="400" y="50" class="title">CERTIFICATE OF STUDENT MISCONDUCT RECORD</text>';
+        $svg .= '<line x1="100" y1="60" x2="700" y2="60" stroke="black" stroke-width="2"/>';
+        
+        // Certificate details
+        $svg .= '<text x="100" y="100" class="label">Certificate Number:</text>';
+        $svg .= '<text x="250" y="100" class="value">' . htmlspecialchars($cert->certificate_number) . '</text>';
+        
+        $svg .= '<text x="100" y="130" class="label">Issued Date:</text>';
+        $svg .= '<text x="250" y="130" class="value">' . htmlspecialchars($cert->issued_date) . '</text>';
+        
+        $svg .= '<text x="100" y="160" class="label">School:</text>';
+        $svg .= '<text x="250" y="160" class="value">' . htmlspecialchars($data['school_name'] ?? 'N/A') . '</text>';
+        
+        $svg .= '<text x="100" y="190" class="label">Location:</text>';
+        $svg .= '<text x="250" y="190" class="value">' . htmlspecialchars($data['school_location'] ?? 'N/A') . '</text>';
+        
+        // Student information header
+        $svg .= '<text x="100" y="240" class="heading">STUDENT INFORMATION</text>';
+        $svg .= '<line x1="100" y1="250" x2="700" y2="250" stroke="black" stroke-width="1"/>';
+        
+        $svg .= '<text x="100" y="280" class="label">Name:</text>';
+        $svg .= '<text x="250" y="280" class="value">' . htmlspecialchars($cert->recipient_name) . '</text>';
+        
+        $svg .= '<text x="100" y="310" class="label">Student ID:</text>';
+        $svg .= '<text x="250" y="310" class="value">' . htmlspecialchars($cert->student_id) . '</text>';
+        
+        $svg .= '<text x="100" y="340" class="label">Program/Grade:</text>';
+        $svg .= '<text x="250" y="340" class="value">' . htmlspecialchars($cert->program_grade ?? 'N/A') . '</text>';
+        
+        // Misconduct details header
+        $svg .= '<text x="100" y="390" class="heading">MISCONDUCT DETAILS</text>';
+        $svg .= '<line x1="100" y1="400" x2="700" y2="400" stroke="black" stroke-width="1"/>';
+        
+        $svg .= '<text x="100" y="430" class="label">Offense Type:</text>';
+        $svg .= '<text x="250" y="430" class="value">' . htmlspecialchars($cert->offense_type) . '</text>';
+        
+        $svg .= '<text x="100" y="460" class="label">Date of Incident:</text>';
+        $svg .= '<text x="250" y="460" class="value">' . htmlspecialchars($cert->date_of_incident) . '</text>';
+        
+        $svg .= '<text x="100" y="490" class="label">Disciplinary Action:</text>';
+        $svg .= '<text x="250" y="490" class="value">' . htmlspecialchars($cert->disciplinary_action) . '</text>';
+        
+        $svg .= '<text x="100" y="520" class="label">Status:</text>';
+        $svg .= '<text x="250" y="520" class="value">' . htmlspecialchars($cert->status) . '</text>';
+        
+        // Issued by section
+        $svg .= '<text x="100" y="570" class="label">Issued By: ' . htmlspecialchars($data['official_name'] ?? 'N/A') . ' (' . htmlspecialchars($data['official_position'] ?? 'N/A') . ')</text>';
+        
+        $svg .= '</svg>';
+        
+        return $svg;
     }
 
     /**
@@ -78,18 +198,18 @@ class CertificateController extends Controller
     public function download($id)
     {
         $cert = Certificate::findOrFail($id);
-        $fileName = "certificates/certificate_{$cert->id}.pdf";
+        $fileName = "certificate_{$cert->id}.svg";
+        $filePath = public_path("certificates/{$fileName}");
 
-        if (!Storage::disk('public')->exists($fileName)) {
-            Log::warning("Download FAILED: File '{$fileName}' not found on public disk for ID {$id}.");
-            abort(404, 'Certificate file not found.');
+        if (!file_exists($filePath)) {
+            Log::warning("Download FAILED: File '{$fileName}' not found in public/certificates for ID {$id}.");
+            abort(404, 'Certificate file not found.'); 
         }
 
-        return Storage::disk('public')->download(
-            $fileName,
-            "certificate_{$cert->certificate_number}.pdf",
-            ['Content-Type' => 'application/pdf']
-        );
+        return response()->file($filePath, [
+            'Content-Type' => 'image/svg+xml',
+            'Content-Disposition' => 'attachment; filename="certificate_' . $cert->certificate_number . '.svg"',
+        ]);
     }
 
     /**
@@ -100,17 +220,12 @@ class CertificateController extends Controller
         $cert = Certificate::where('certificate_number', $certificate_number)->first();
 
         if (!$cert) {
-            return response()->json(['valid' => false], 404);
+            return response()->json(['valid' => false, 'message' => 'Certificate not found.'], 404);
         }
 
         return response()->json([
             'valid' => true,
-            'certificate' => [
-                'recipient_name' => $cert->recipient_name,
-                'title' => $cert->title,
-                'issued_at' => $cert->issued_at ? $cert->issued_at->toDateString() : null,
-                'certificate_number' => $cert->certificate_number,
-            ],
+            'certificate' => $cert->toArray()
         ]);
     }
 }
