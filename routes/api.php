@@ -14,14 +14,6 @@ use App\Http\Controllers\UserProfileController;
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
 
-// --- Public Access Routes for Certificates ---
-// NOTE: These routes are moved to web.php to avoid conflicts and ensure proper handling
-// Route::get('/certificates/download/{id}', [CertificateController::class, 'download'])
-//     ->name('certificates.download'); 
-
-// Route::get('/certificates/verify/{certificate_number}', [CertificateController::class, 'verify'])
-//     ->name('certificates.verify');
-
 // --- Authenticated Routes (Requires Bearer Token) ---
 Route::middleware('auth:sanctum')->group(function () {
 
@@ -31,21 +23,40 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/user/profile', [UserController::class, 'updateProfile']);
     Route::post('/profile/picture', [UserProfileController::class, 'updateProfilePicture']);
 
-    // Student API routes
-    Route::resource('students', StudentController::class);
+    // STUDENT API ROUTES
+    Route::get('/students/dropdown', [StudentController::class, 'getAllForDropdown']);
+    Route::resource('students', StudentController::class)->except(['destroy']);
+    Route::delete('/students/{id}', [StudentController::class, 'destroy']);
+    Route::post('/students/{id}/restore', [StudentController::class, 'restore']);
+    Route::delete('/students/{id}/force-delete', [StudentController::class, 'forceDelete']);
 
     // INCIDENT MANAGEMENT (FULL CRUD)
-    Route::get('/incidents', [IncidentController::class, 'index']);
-    Route::post('/incidents', [IncidentController::class, 'store']);
-    Route::get('/incidents/{incident}', [IncidentController::class, 'show']);
-    Route::put('/incidents/{incident}', [IncidentController::class, 'update']);
-    Route::put('/incidents/{incident}/status', [IncidentController::class, 'updateStatus']);
-    Route::delete('/incidents/{incident}', [IncidentController::class, 'destroy']);
-    Route::patch('/incidents/{incident}/action', [IncidentController::class, 'updateActionTaken']);
+    Route::resource('incidents', IncidentController::class)->except(['destroy']);
+    Route::put('/incidents/{id}/status', [IncidentController::class, 'updateStatus']);
+    Route::delete('/incidents/{id}', [IncidentController::class, 'destroy']);
+    Route::patch('/incidents/{id}/action', [IncidentController::class, 'updateActionTaken']);
+    Route::post('/incidents/{id}/restore', [IncidentController::class, 'restore']);
+    Route::delete('/incidents/{id}/force-delete', [IncidentController::class, 'forceDelete']);
 
-    // Dashboard Stats Route
+    // 📊 DASHBOARD / STATS ROUTES
+    // Admin Dashboard Routes (for detailed admin view)
     Route::get('/admin/stats', [DashboardController::class, 'getStats']);
+    Route::get('/admin/stats/monthly-misconduct', [DashboardController::class, 'getMonthlyMisconduct']);
+    Route::get('/admin/stats/misconduct-distribution', [DashboardController::class, 'getMisconductDistribution']);
+    Route::get('/admin/stats/specific-misconduct-distribution', [DashboardController::class, 'getSpecificMisconductDistribution']);
+    Route::get('/admin/stats/misconduct-per-program', [DashboardController::class, 'getMisconductPerProgram']);
 
-    // Certificate create route (This API endpoint MUST be protected)
-    Route::post('/certificates', [CertificateController::class, 'store']);
+
+    // NEW: General User Statistics Routes (accessible by any authenticated user)
+    Route::get('/stats', [DashboardController::class, 'getStats']);
+    Route::get('/stats/monthly-misconduct', [DashboardController::class, 'getMonthlyMisconduct']);
+    Route::get('/stats/misconduct-distribution', [DashboardController::class, 'getMisconductDistribution']);
+    Route::get('/stats/specific-misconduct', [DashboardController::class, 'getSpecificMisconductDistribution']);
+    Route::get('/stats/misconduct-per-program', [DashboardController::class, 'getMisconductPerProgram']);
+
+    // Certificate routes
+    Route::resource('certificates', CertificateController::class)->except(['destroy']);
+    Route::delete('/certificates/{id}', [CertificateController::class, 'destroy']);
+    Route::post('/certificates/{id}/restore', [CertificateController::class, 'restore']);
+    Route::delete('/certificates/{id}/force-delete', [CertificateController::class, 'forceDelete']);
 });

@@ -4,10 +4,11 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes; // <-- ADDED
 
 class Student extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes; // <-- UPDATED
 
     // Table name
     protected $table = 'students';

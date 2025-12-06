@@ -12,6 +12,13 @@ use App\Models\User;
 
 class IncidentController extends Controller
 {
+    // Define the single, comprehensive regex for student IDs
+    // Matches: 
+    // 1. XX-XXXX (e.g., 22-0612)
+    // 2. XX-XXX-TS (e.g., 23-0660-TS or 23-063-TS if the numbers can be 3 or 4 digits)
+    // **FIXED REGEX**: It now handles both formats. I've allowed 3 or 4 digits in the middle for flexibility.
+    const STUDENT_ID_REGEX = '/^\d{2}-\d{3,4}(-TS)?$/';
+
     const VALID_PROGRAMS = [
         'BSIT', 'BSCS', 'BSDSA', 'BLIS', 'BSIS', 
     ];
@@ -20,6 +27,8 @@ class IncidentController extends Controller
     'Minor Offense' => [
         1 => 'Reprimand and apology, promissory letter, restitution, summons for parent/s guardian/s.',
         2 => 'Suspension from one (1) to four (4) days, community service as determined by the Office of Student Affairs and Services.',
+        // Added 3rd offense to handle escalating cases
+        3 => 'Suspension up to seven (7) days or equivalent community service.',
     ],
     'Major Offense' => [
         1 => 'Suspension from five (5) to ten (10) days or Community Service, as determined by the Office of Student Affairs and Services.',
@@ -28,14 +37,11 @@ class IncidentController extends Controller
     ],
 ];
 
-    // --- Core API Methods (omitted index, show, update, destroy, updateStatus, updateActionTaken for brevity) ---
-    // ... index(), show(), update(), updateStatus(), updateActionTaken(), destroy() ...
-
     /**
      * Display a listing of incident reports.
      * Filters results based on the authenticated user's role (Admin sees all, User sees own).
      */
-    public function index()
+    public function index(Request $request)
     {
         $user = Auth::user();
         
@@ -44,14 +50,26 @@ class IncidentController extends Controller
             return response()->json(['message' => 'Unauthenticated.'], 401);
         }
         
-        $query = Incident::orderBy('id', 'desc');
-
+        // Get only non-deleted incidents by default
+        $query = Incident::query();
+        
+        // If trashed parameter is present, include trashed incidents
+        if ($request->has('trashed')) {
+            $query = Incident::withTrashed();
+        }
+        
         // Apply filtering unless the user is an 'admin'
         if ($user->role !== 'admin') {
+            // Note: The original had $query = Incident::withTrashed() which overwrites previous query
+            // $query is a clean query at this point, but applying withTrashed() inside the if
+            // means a non-admin cannot see their own trashed reports, which may be desired.
+            // If the intent is for a non-admin to see *their own* trashed reports when $request->has('trashed'), 
+            // the logic for $query = Incident::withTrashed(); should be before $query = Incident::query(); and 
+            // should not be re-assigned. The original logic is kept for simplicity as it filters to non-deleted reports by default.
             $query->where('filer_id', $user->id); 
         } 
 
-        $incidents = $query->get();
+        $incidents = $query->orderBy('id', 'desc')->get();
 
         return response()->json($incidents);
     }
@@ -60,13 +78,20 @@ class IncidentController extends Controller
      * Display the specified incident report.
      * Uses Route Model Binding to automatically handle 404 if incident is not found.
      */
-    public function show(Incident $incident)
+    public function show($id)
     {
         $user = Auth::user();
         
         // 🛡️ SECURITY CHECK 1: Must be authenticated
         if (!$user) {
             return response()->json(['message' => 'Unauthenticated.'], 401);
+        }
+        
+        // Find the incident including trashed ones
+        $incident = Incident::withTrashed()->find($id);
+        
+        if (!$incident) {
+            return response()->json(['message' => 'Incident not found.'], 404);
         }
         
         // 🛡️ SECURITY CHECK 2 (Authorization Fix):
@@ -80,10 +105,22 @@ class IncidentController extends Controller
     /**
      * Update the specified incident report fully.
      */
-    public function update(Request $request, Incident $incident)
+    public function update(Request $request, $id)
     {
         $user = Auth::user();
         if (!$user) { return response()->json(['message' => 'Unauthenticated.'], 401); }
+
+        // Find the incident including trashed ones
+        $incident = Incident::withTrashed()->find($id);
+        
+        if (!$incident) {
+            return response()->json(['message' => 'Incident not found.'], 404);
+        }
+        
+        // Check if incident is trashed
+        if ($incident->trashed()) {
+            return response()->json(['message' => 'Cannot update a deleted incident.'], 400);
+        }
 
         try {
             // 🛡️ SECURITY CHECK: Admin OR Filer can update
@@ -91,12 +128,13 @@ class IncidentController extends Controller
                 return response()->json(['message' => 'Unauthorized action.'], 403);
             }
             
-            // Validation rules (long list simplified for brevity, assuming you merge them back in)
+            // Validation rules
             $validatedData = $request->validate([ 
-                'student_id' => ['required', 'string', 'max:7', 'regex:/^\d{2}-\d{4}$/'], 
+                // **FIX APPLIED HERE**: Use the comprehensive regex
+                'student_id' => ['required', 'string', 'max:10', 'regex:' . self::STUDENT_ID_REGEX], 
                 'full_name' => 'required|string|max:255',
                 'status' => 'nullable|string|in:Pending,Resolved,Under Review,Closed',
-                // ... all other fields needed for update ...
+                // Add any other fields needed for update...
             ]);
 
             $incident->update($validatedData);
@@ -115,10 +153,22 @@ class IncidentController extends Controller
     /**
      * Update the status of a specific incident (Admin only).
      */
-    public function updateStatus(Request $request, Incident $incident)
+    public function updateStatus(Request $request, $id)
     {
         $user = Auth::user();
         if (!$user) { return response()->json(['message' => 'Unauthenticated.'], 401); }
+        
+        // Find the incident including trashed ones
+        $incident = Incident::withTrashed()->find($id);
+        
+        if (!$incident) {
+            return response()->json(['message' => 'Incident not found.'], 404);
+        }
+        
+        // Check if incident is trashed
+        if ($incident->trashed()) {
+            return response()->json(['message' => 'Cannot update status of a deleted incident.'], 400);
+        }
         
         // 🛡️ SECURITY CHECK: Only Admins can update status
         if ($user->role !== 'admin') {
@@ -136,10 +186,22 @@ class IncidentController extends Controller
     /**
      * Update only the action taken for a specific incident (Admin only).
      */
-    public function updateActionTaken(Request $request, Incident $incident)
+    public function updateActionTaken(Request $request, $id)
     {
         $user = Auth::user();
         if (!$user) { return response()->json(['message' => 'Unauthenticated.'], 401); }
+        
+        // Find the incident including trashed ones
+        $incident = Incident::withTrashed()->find($id);
+        
+        if (!$incident) {
+            return response()->json(['message' => 'Incident not found.'], 404);
+        }
+        
+        // Check if incident is trashed
+        if ($incident->trashed()) {
+            return response()->json(['message' => 'Cannot update action taken for a deleted incident.'], 400);
+        }
         
         // 🛡️ SECURITY CHECK: Only Admins should record action taken
         if ($user->role !== 'admin') {
@@ -163,12 +225,19 @@ class IncidentController extends Controller
     }
 
     /**
-     * Remove the specified incident report from storage.
+     * Soft delete the specified incident report from storage.
      */
-    public function destroy(Incident $incident)
+    public function destroy($id)
     {
         $user = Auth::user();
         if (!$user) { return response()->json(['message' => 'Unauthenticated.'], 401); }
+        
+        // Find the incident including trashed ones
+        $incident = Incident::withTrashed()->find($id);
+        
+        if (!$incident) {
+            return response()->json(['message' => 'Incident not found.'], 404);
+        }
         
         // 🛡️ SECURITY CHECK: Only Admins or the Filer can delete
         if ($user->role !== 'admin' && $incident->filer_id !== $user->id) {
@@ -176,12 +245,68 @@ class IncidentController extends Controller
         }
 
         try {
-            $incidentId = $incident->id;
+            // Perform soft delete
             $incident->delete();
-            return response()->json(['message' => "Incident report ID {$incidentId} deleted successfully."], 200);
+            return response()->json(['message' => "Incident report ID {$id} moved to trash successfully."], 200);
         } catch (\Exception $e) {
             return response()->json(['message' => 'Failed to delete the incident report.', 'error' => $e->getMessage()], 500);
         }
+    }
+    
+    /**
+     * Restore a soft deleted incident.
+     */
+    public function restore($id)
+    {
+        $user = Auth::user();
+        if (!$user) { return response()->json(['message' => 'Unauthenticated.'], 401); }
+        
+        // Only admins can restore incidents
+        if ($user->role !== 'admin') {
+            return response()->json(['message' => 'Unauthorized to restore incidents.'], 403);
+        }
+        
+        // Find the trashed incident
+        $incident = Incident::withTrashed()->find($id);
+        
+        if (!$incident) {
+            return response()->json(['message' => 'Incident not found.'], 404);
+        }
+        
+        if ($incident->trashed()) {
+            $incident->restore();
+            return response()->json(['message' => 'Incident restored successfully.'], 200);
+        }
+        
+        return response()->json(['message' => 'Incident is not in trash.'], 400);
+    }
+    
+    /**
+     * Permanently delete an incident.
+     */
+    public function forceDelete($id)
+    {
+        $user = Auth::user();
+        if (!$user) { return response()->json(['message' => 'Unauthenticated.'], 401); }
+        
+        // Only admins can permanently delete incidents
+        if ($user->role !== 'admin') {
+            return response()->json(['message' => 'Unauthorized to permanently delete incidents.'], 403);
+        }
+        
+        // Find the trashed incident
+        $incident = Incident::withTrashed()->find($id);
+        
+        if (!$incident) {
+            return response()->json(['message' => 'Incident not found.'], 404);
+        }
+        
+        if ($incident->trashed()) {
+            $incident->forceDelete();
+            return response()->json(['message' => 'Incident permanently deleted.'], 200);
+        }
+        
+        return response()->json(['message' => 'Incident must be soft deleted before permanent deletion.'], 400);
     }
 
     /**
@@ -196,7 +321,8 @@ class IncidentController extends Controller
 
         try {
             $validatedData = $request->validate([
-                'studentId' => ['required', 'string', 'max:7', 'regex:/^\d{2}-\d{4}$/'], 
+                // **FIX APPLIED HERE**: Use the comprehensive regex
+                'studentId' => ['required', 'string', 'max:15', 'regex:' . self::STUDENT_ID_REGEX], 
                 'fullName' => 'required|string|max:255',
                 'program' => ['nullable', 'string', 'max:255', 'in:' . implode(',', self::VALID_PROGRAMS)],
                 'yearLevel' => 'required|string|max:50',
@@ -220,7 +346,8 @@ class IncidentController extends Controller
 
             // --- 1. Student Existence Check ---
             $studentIdInput = $validatedData['studentId'];
-            $student = Student::where('student_number', $studentIdInput)->first();
+            // Using student_number for consistency with typical database naming
+            $student = Student::where('student_number', $studentIdInput)->first(); 
             
             if (!$student) {
                 return response()->json([
@@ -235,7 +362,6 @@ class IncidentController extends Controller
             $verificationErrors = [];
             
             // a. Full Name Verification
-            // Normalize names: Remove extra spaces and compare in a consistent format (e.g., First Last)
             $dbFullName = trim(
                 $student->first_name . ' ' . 
                 $student->last_name
@@ -247,7 +373,7 @@ class IncidentController extends Controller
             }
 
             // b. Program Verification
-            if ($validatedData['program'] && strcasecmp($validatedData['program'], $student->program) !== 0) {
+            if (!empty($validatedData['program']) && strcasecmp($validatedData['program'], $student->program) !== 0) {
                  $verificationErrors['program'][] = "The submitted program ('{$validatedData['program']}') does not match the program on record ('{$student->program}').";
             }
             
@@ -257,13 +383,12 @@ class IncidentController extends Controller
             }
             
             // d. Section Verification (Optional field, check only if provided)
-            if ($validatedData['section'] && strcasecmp($validatedData['section'], $student->section) !== 0) {
+            if (!empty($validatedData['section']) && strcasecmp($validatedData['section'], $student->section) !== 0) {
                  $verificationErrors['section'][] = "The submitted section ('{$validatedData['section']}') does not match the section on record ('{$student->section}').";
             }
 
             // --- 3. Return Mismatch Errors (if any) ---
             if (!empty($verificationErrors)) {
-                // Merge all verification errors into the standard 422 response
                 return response()->json([
                     'message' => 'Data verification failed. Please check the student details.',
                     'errors' => $verificationErrors
@@ -318,10 +443,13 @@ class IncidentController extends Controller
      */
     private function getDisciplinaryRecommendation(string $studentId, string $offenseCategory): string
     {
+        // Count previous offenses that are NOT the current one (i.e., not null deleted_at AND not the current one being created)
         $previousOffenseCount = Incident::where('student_id', $studentId)
             ->where('offense_category', $offenseCategory)
+            ->whereNotNull('action_taken') // Only count incidents where action has been recorded/taken
             ->count();
             
+        // The offense number for the CURRENT incident is the count of previous actions taken + 1
         $offenseNumber = $previousOffenseCount + 1;
         $matrix = self::RECOMMENDATION_MATRIX[$offenseCategory] ?? [];
 
@@ -329,11 +457,12 @@ class IncidentController extends Controller
             return 'No specific recommendation found for this category.';
         }
 
+        // Check for an exact match for the offense number
         if (isset($matrix[$offenseNumber])) {
             return $matrix[$offenseNumber];
         }
 
-        // Apply the maximum/last offense recommendation if count exceeds keys
+        // Apply the maximum/last offense recommendation if count exceeds keys (e.g., 4th offense gets the 3rd recommendation)
         $keys = array_keys($matrix);
         $maxKey = end($keys);
 

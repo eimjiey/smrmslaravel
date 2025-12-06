@@ -14,6 +14,24 @@ use Illuminate\Validation\ValidationException;
 class CertificateController extends Controller
 {
     /**
+     * Display a listing of the resource.
+     */
+    public function index(Request $request)
+    {
+        // Get only non-deleted certificates by default
+        $query = Certificate::query();
+        
+        // If trashed parameter is present, include trashed certificates
+        if ($request->has('trashed')) {
+            $query = Certificate::withTrashed();
+        }
+        
+        $certificates = $query->orderBy('created_at', 'desc')->paginate(10);
+        
+        return response()->json($certificates);
+    }
+
+    /**
      * Store certificate data and generate PDF.
      */
     public function store(Request $request)
@@ -193,11 +211,86 @@ class CertificateController extends Controller
     }
 
     /**
+     * Display the specified resource.
+     */
+    public function show($id)
+    {
+        $cert = Certificate::withTrashed()->findOrFail($id);
+        return response()->json($cert);
+    }
+
+    /**
+     * Soft delete the specified certificate.
+     */
+    public function destroy($id)
+    {
+        $cert = Certificate::findOrFail($id);
+        $cert->delete(); // This will perform a soft delete
+        
+        return response()->json([
+            'message' => 'Certificate moved to trash successfully.'
+        ]);
+    }
+
+    /**
+     * Restore a soft deleted certificate.
+     */
+    public function restore($id)
+    {
+        $cert = Certificate::withTrashed()->findOrFail($id);
+        
+        if ($cert->trashed()) {
+            $cert->restore();
+            return response()->json([
+                'message' => 'Certificate restored successfully.'
+            ]);
+        }
+        
+        return response()->json([
+            'message' => 'Certificate is not in trash.'
+        ]);
+    }
+
+    /**
+     * Permanently delete a certificate.
+     */
+    public function forceDelete($id)
+    {
+        $cert = Certificate::withTrashed()->findOrFail($id);
+        
+        if ($cert->trashed()) {
+            // Delete the certificate file if it exists
+            $fileName = "certificate_{$cert->id}.svg";
+            $filePath = public_path("certificates/{$fileName}");
+            
+            if (file_exists($filePath)) {
+                unlink($filePath);
+            }
+            
+            $cert->forceDelete();
+            
+            return response()->json([
+                'message' => 'Certificate permanently deleted.'
+            ]);
+        }
+        
+        return response()->json([
+            'message' => 'Certificate must be soft deleted before permanent deletion.'
+        ], 400);
+    }
+
+    /**
      * Download certificate file.
      */
     public function download($id)
     {
-        $cert = Certificate::findOrFail($id);
+        $cert = Certificate::withTrashed()->findOrFail($id);
+        
+        // Check if certificate is trashed
+        if ($cert->trashed()) {
+            abort(404, 'Certificate not found.');
+        }
+        
         $fileName = "certificate_{$cert->id}.svg";
         $filePath = public_path("certificates/{$fileName}");
 
@@ -217,10 +310,20 @@ class CertificateController extends Controller
      */
     public function verify($certificate_number)
     {
-        $cert = Certificate::where('certificate_number', $certificate_number)->first();
+        // Include trashed certificates in verification
+        $cert = Certificate::withTrashed()->where('certificate_number', $certificate_number)->first();
 
         if (!$cert) {
             return response()->json(['valid' => false, 'message' => 'Certificate not found.'], 404);
+        }
+
+        // If certificate is trashed, indicate that in the response
+        if ($cert->trashed()) {
+            return response()->json([
+                'valid' => true,
+                'certificate' => $cert->toArray(),
+                'message' => 'Certificate is valid but has been deleted.'
+            ]);
         }
 
         return response()->json([

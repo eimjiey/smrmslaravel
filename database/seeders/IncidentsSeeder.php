@@ -13,25 +13,37 @@ class IncidentsSeeder extends Seeder
         // Fetch all students from database
         $students = DB::table('students')->get();
 
-        // Offense lists
+        // Updated Offense lists
         $minorOffenses = [
             'Failure to wear uniform',
-            'Improper haircut',
-            'Wearing prohibited accessories',
-            'Unauthorized use of mobile phone',
-            'Littering inside campus',
-            'Classroom disturbance',
-            'Loitering during class hours',
+            'Pornographic materials',
+            'Littering',
+            'Loitering',
+            'Eating in restricted areas',
+            'Unauthorized use of school facilities',
+            'Lending/borrowing ID',
+            'Driving violations',
         ];
 
         $majorOffenses = [
-            'Cheating/forgery',
-            'Bullying or harassment',
-            'Damage to school property',
-            'Physical altercation',
-            'Stealing',
+            'Alcohol/drugs/weapons',
+            'Smoking',
+            'Disrespect',
             'Vandalism',
-            'Alcohol or prohibited substance possession',
+            'Cheating/forgery',
+            'Barricades/obstructions',
+            'Physical/verbal assault',
+            'Hazing',
+            'Harassment/sexual abuse',
+            'Unauthorized software/gadgets',
+            'Unrecognized fraternity/sorority',
+            'Gambling',
+            'Public indecency',
+            'Offensive/subversive materials',
+            'Grave threats',
+            'Inciting fight/sedition',
+            'Unauthorized activity',
+            'Bullying',
         ];
 
         $locations = [
@@ -53,7 +65,7 @@ class IncidentsSeeder extends Seeder
             // Randomize offense category
             $isMinor = rand(0, 1) === 1;
             $offenseCategory = $isMinor ? 'Minor Offense' : 'Major Offense';
-            $specificOffense = $isMinor 
+            $specificOffense = $isMinor
                 ? $minorOffenses[array_rand($minorOffenses)]
                 : $majorOffenses[array_rand($majorOffenses)];
 
@@ -63,7 +75,7 @@ class IncidentsSeeder extends Seeder
                 'program'           => $student->program,
                 'year_level'        => $student->year_level,
                 'section'           => $student->section,
-                
+
                 'date_of_incident'  => now()->subDays(rand(1, 120))->format('Y-m-d'),
                 'time_of_incident'  => now()->setTime(rand(7, 17), rand(0, 59))->format('H:i:s'),
                 'location'          => $locations[array_rand($locations)],
