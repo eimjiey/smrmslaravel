@@ -2,109 +2,127 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Student;
 use Illuminate\Http\Request;
+use App\Models\Student;
+use App\Models\Program; 
+use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB; 
 
 class StudentController extends Controller
 {
     /**
      * Display a listing of students (Paginated Index View/API).
+     * FIX: Uses whereHas to filter by Program Code via relationship.
      */
     public function index(Request $request) 
     {
-        // Start the query
-        $query = Student::query();
+        $query = Student::with(['program']); 
         
-        // If trashed parameter is present, include trashed students
         if ($request->has('trashed')) {
-            $query = Student::withTrashed();
+            $query->withTrashed();
         }
 
-        // Filter by program if selected
         if ($request->filled('program')) {
-            $query->where('program', $request->program);
+            $programCode = $request->program;
+            
+            // CRITICAL FIX: Use whereHas to filter by Program Code in the related table
+            $query->whereHas('program', function ($q) use ($programCode) {
+                // Assuming the filter value (e.g., 'BLIS') matches the 'code' or 'description'
+                $q->where('code', $programCode)
+                  ->orWhere('description', $programCode);
+            });
         }
-
-        // Search by student number if provided
-        if ($request->filled('student_number')) {
-            $query->where('student_number', 'like', '%' . $request->student_number . '%');
+        
+        if ($request->filled('search')) {
+            $search = '%' . $request->search . '%';
+            $query->where(function ($q) use ($search) {
+                $q->where('student_number', 'like', $search)
+                  ->orWhere('first_name', 'like', $search)
+                  ->orWhere('last_name', 'like', $search)
+                  // Safely search through the program code/name via relationship
+                  ->orWhereHas('program', function($q2) use ($search) {
+                       $q2->where('code', 'like', $search)->orWhere('description', 'like', $search);
+                  });
+            });
         }
+        
+        $students = $query->orderBy('last_name')->paginate($request->input('per_page', 10));
 
-        // Paginate the results
-        $students = $query->orderBy('last_name')->paginate(10);
-
-        // Return JSON for API requests
+        // CRITICAL MAPPING FOR API RESPONSE (Ensures the 'program' field is a simple string for Vue)
         if ($request->wantsJson()) {
+            $students->getCollection()->transform(function ($student) {
+                // Safely get program code/name from the eager-loaded relationship
+                $programName = $student->program?->code ?? $student->program?->name ?? 'N/A';
+                
+                return array_merge($student->toArray(), [
+                    'full_name' => "{$student->first_name} {$student->last_name}",
+                    'program' => $programName, 
+                ]);
+            });
             return response()->json($students, 200);
         }
 
-        // Fetch distinct programs for the filter dropdown
         $programs = Student::select('program')->distinct()->pluck('program');
-
-        // Pass both $students and $programs to the view
         return view('students.index', compact('students', 'programs'));
     }
 
     /**
      * Fetch a list of all active students for the frontend dropdown.
-     * Maps fields to 'id' (student_number) and 'fullName'.
+     */
+
+// StudentController.php
+
+    /**
+     * Fetch a list of all active students for the frontend dropdown.
      */
     public function getAllForDropdown()
     {
-        // Select only necessary active students (not trashed)
-        $students = Student::select(
-            'student_number', 
-            'first_name',
-            'last_name',
-            'program',
-            'year_level',
-            'section'
-        )
-        ->get()
-        ->map(function ($student) {
-            // Map the Laravel model attributes to the format Vue expects
-            return [
-                'id' => $student->student_number, // The value for the dropdown
-                'fullName' => $student->first_name . ' ' . $student->last_name, // The display text
-                'program' => $student->program,
-                'year_level' => $student->year_level,
-                'section' => $student->section,
-            ];
-        });
+        try {
+            $students = Student::with(['program'])
+                ->select(
+                    // FIX: Changed 'id' to 'student_id' to match the database column name.
+                    'student_id', 'student_number', 'first_name', 'last_name', 
+                    'program_id', 'year_level', 'section'
+                )
+                ->get()
+                ->map(function ($student) {
+                    
+                    $programName = $student->program?->code ?? $student->program?->name ?? 'N/A';
+                    
+                    return [
+                        // FIX: Use the primary key $student->student_id here
+                        'id' => $student->student_id,
+                        'student_id' => $student->student_number, 
+                        'full_name' => "{$student->first_name} {$student->last_name}",
+                        
+                        'program_id' => $student->program_id, 
+                        'program' => $programName,
+                        
+                        'year_level' => $student->year_level,
+                        'section' => $student->section,
+                        'first_name' => $student->first_name, 
+                        'last_name' => $student->last_name, 
+                    ];
+                });
 
-        return response()->json($students, 200);
+            return response()->json($students, 200);
+
+        } catch (\Exception $e) {
+            Log::error('Error fetching students for dropdown: ' . $e->getMessage());
+            return response()->json(['message' => 'Server error loading student list. Check logs for details.', 'error' => $e->getMessage()], 500);
+        }
     }
     
-    //-------------------------------------------------------------
-    
-    /**
-     * Show the form for creating a new student.
-     */
-    public function create()
-    {
-        return view('students.create');
-    }
-
     /**
      * Display the specified student.
      */
     public function show($id)
     {
-        $student = Student::withTrashed()->find($id);
+        $student = Student::withTrashed()->where('student_id', $id)->first(); 
         
-        if (!$student) {
-            return response()->json(['message' => 'Student not found'], 404);
-        }
-        
-        // This is primarily used for API lookups based on PK, adjust output if needed.
-        return response()->json([
-            'id' => $student->student_number,
-            'fullName' => $student->first_name . ' ' . $student->last_name,
-            'program' => $student->program,
-            'year_level' => $student->year_level,
-            'section' => $student->section,
-            // ... include other fields ...
-        ], 200);
+        if (!$student) { return response()->json(['message' => 'Student not found'], 404); }
+        return response()->json($student, 200);
     }
 
     /**
@@ -128,37 +146,23 @@ class StudentController extends Controller
             'guardian_name' => 'required|string|max:150',
             'guardian_contact' => 'required|string|max:50',
         ]);
-
-        $student = Student::create($validated);
-
-        // Return JSON for API requests
-        if ($request->wantsJson()) {
-            return response()->json($student, 201);
-        }
-
-        return redirect()->route('students.index')
-                         ->with('success', 'Student created successfully.');
-    }
-
-    /**
-     * Show the form for editing the specified student.
-     */
-    public function edit($id)
-    {
-        $student = Student::withTrashed()->find($id);
         
-        if (!$student) {
-            return redirect()->route('students.index')
-                             ->with('error', 'Student not found.');
+        $programCode = $validated['program'];
+        $program = Program::where('code', $programCode)->orWhere('description', $programCode)->first();
+
+        if (!$program) {
+            throw ValidationException::withMessages(['program' => ['The selected program is invalid or does not exist.']]);
         }
         
-        // Prevent editing of trashed students
-        if ($student->trashed()) {
-            return redirect()->route('students.index')
-                             ->with('error', 'Cannot edit a deleted student.');
-        }
+        $createData = array_merge($validated, [
+            'program_id' => $program->id,
+            'program' => $programCode, 
+        ]);
         
-        return view('students.edit', compact('student'));
+        $student = Student::create($createData);
+
+        if ($request->wantsJson()) { return response()->json($student, 201); }
+        return redirect()->route('students.index')->with('success', 'Student created successfully.');
     }
 
     /**
@@ -166,26 +170,21 @@ class StudentController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $student = Student::withTrashed()->find($id);
-        
-        if (!$student) {
-            return response()->json(['message' => 'Student not found'], 404);
-        }
-        
-        // Prevent updating of trashed students
-        if ($student->trashed()) {
-            return response()->json(['message' => 'Cannot update a deleted student'], 400);
-        }
+        $student = Student::withTrashed()->where('student_id', $id)->first();
+        if (!$student) { return response()->json(['message' => 'Student not found'], 404); }
+        if ($student->trashed()) { return response()->json(['message' => 'Cannot update a deleted student'], 400); }
+
+        $studentPkValue = $student->student_id;
 
         $validated = $request->validate([
-            'student_number' => 'required|string|max:10|unique:students,student_number,' . $student->student_id . ',student_id',
+            'student_number' => 'required|string|max:10|unique:students,student_number,' . $student->student_id . ',student_id', 
             'first_name' => 'required|string|max:100',
             'middle_name' => 'nullable|string|max:100',
             'last_name' => 'required|string|max:100',
             'gender' => 'required|in:Male,Female,Other',
             'date_of_birth' => 'required|date',
             'program' => 'required|string|max:150',
-            'year_level' => 'required|in:1st Year,2nd Year,3rd Year,4th Year,5th Year',
+            'year_level' => 'required|in:1st Year,2nd Year,3rd Year,4th Year',
             'section' => 'nullable|string|max:50',
             'contact_number' => 'required|string|max:20',
             'email' => 'required|email|max:150|unique:students,email,' . $student->student_id . ',student_id',
@@ -193,16 +192,23 @@ class StudentController extends Controller
             'guardian_name' => 'required|string|max:150',
             'guardian_contact' => 'required|string|max:50',
         ]);
-
-        $student->update($validated);
-
-        // Return JSON for API requests
-        if ($request->wantsJson()) {
-            return response()->json($student, 200);
+        
+        $programCode = $validated['program'];
+        $program = Program::where('code', $programCode)->orWhere('description', $programCode)->first();
+        
+        if (!$program) {
+            throw ValidationException::withMessages(['program' => ['The selected program is invalid or does not exist.']]);
         }
+        
+        $updateData = array_merge($validated, [
+            'program_id' => $program->id,
+            'program' => $programCode, 
+        ]);
 
-        return redirect()->route('students.index')
-                         ->with('success', 'Student updated successfully.');
+        $student->update($updateData);
+
+        if ($request->wantsJson()) { return response()->json($student, 200); }
+        return redirect()->route('students.index')->with('success', 'Student updated successfully.');
     }
 
     /**
@@ -210,21 +216,13 @@ class StudentController extends Controller
      */
     public function destroy(Request $request, $id)
     {
-        $student = Student::withTrashed()->find($id);
-        
-        if (!$student) {
-            return response()->json(['message' => 'Student not found'], 404);
-        }
+        $student = Student::withTrashed()->where('student_id', $id)->first();
+        if (!$student) { return response()->json(['message' => 'Student not found'], 404); }
 
         $student->delete();
 
-        // Return JSON for API requests
-        if ($request->wantsJson()) {
-            return response()->json(['message' => 'Student moved to trash successfully'], 200);
-        }
-
-        return redirect()->route('students.index')
-                        ->with('success', 'Student deleted successfully.');
+        if ($request->wantsJson()) { return response()->json(['message' => 'Student moved to trash successfully'], 200); }
+        return redirect()->route('students.index')->with('success', 'Student deleted successfully.');
     }
     
     /**
@@ -232,17 +230,12 @@ class StudentController extends Controller
      */
     public function restore($id)
     {
-        $student = Student::withTrashed()->find($id);
-        
-        if (!$student) {
-            return response()->json(['message' => 'Student not found'], 404);
-        }
-        
+        $student = Student::withTrashed()->where('student_id', $id)->first();
+        if (!$student) { return response()->json(['message' => 'Student not found'], 404); }
         if ($student->trashed()) {
             $student->restore();
             return response()->json(['message' => 'Student restored successfully'], 200);
         }
-        
         return response()->json(['message' => 'Student is not in trash'], 400);
     }
     
@@ -251,17 +244,12 @@ class StudentController extends Controller
      */
     public function forceDelete($id)
     {
-        $student = Student::withTrashed()->find($id);
-        
-        if (!$student) {
-            return response()->json(['message' => 'Student not found'], 404);
-        }
-        
+        $student = Student::withTrashed()->where('student_id', $id)->first();
+        if (!$student) { return response()->json(['message' => 'Student not found'], 404); }
         if ($student->trashed()) {
             $student->forceDelete();
             return response()->json(['message' => 'Student permanently deleted'], 200);
         }
-        
         return response()->json(['message' => 'Student must be soft deleted before permanent deletion'], 400);
     }
 }

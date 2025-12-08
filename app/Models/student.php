@@ -4,33 +4,30 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes; // <-- ADDED
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Student extends Model
 {
-    use HasFactory, SoftDeletes; // <-- UPDATED
+    use HasFactory, SoftDeletes;
 
-    // Table name
     protected $table = 'students';
-
-    // Primary key (This is the auto-incrementing integer ID)
-    protected $primaryKey = 'student_id';
-
-    // Auto-increment 
+    
+    // **CRITICAL FIX:** Align primary key name with the migration definition.
+    protected $primaryKey = 'student_id'; 
+    
     public $incrementing = true;
-
-    // Primary key type
     protected $keyType = 'int';
 
-    // Mass assignable fields
     protected $fillable = [
-        'student_number', // The unique ID used for lookups (e.g., 23-0001)
+        'student_number', 
         'first_name',
         'last_name',
         'middle_name',
         'gender',
         'date_of_birth',
-        'program',
+        'program_id', 
         'year_level',
         'section',
         'contact_number',
@@ -38,17 +35,24 @@ class Student extends Model
         'address',
         'guardian_name',
         'guardian_contact',
+        // Removed 'program' field from fillable array as it is now derived from 'program_id'
     ];
 
     /**
      * Get the incident reports associated with the student.
      */
-    public function incidents()
+    public function incidents(): HasMany
     {
-        // NOTE: If the 'student_id' column in the incidents table holds the
-        // 'student_number' (e.g., 23-0001) and not the primary key 'id', 
-        // you should adjust the foreign key relationship if needed.
-        // Based on your Incident model using 'student_id' as the unique number:
+        // student_id (FK on incidents table) links to student_number (Unique Key on students table)
         return $this->hasMany(Incident::class, 'student_id', 'student_number');
+    }
+
+    /**
+     * Get the program the student belongs to.
+     */
+    public function program(): BelongsTo
+    {
+        // program_id (FK on students table) links to id (PK on programs table)
+        return $this->belongsTo(Program::class, 'program_id');
     }
 }
