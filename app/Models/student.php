@@ -13,10 +13,7 @@ class Student extends Model
     use HasFactory, SoftDeletes;
 
     protected $table = 'students';
-    
-    // **CRITICAL FIX:** Align primary key name with the migration definition.
     protected $primaryKey = 'student_id'; 
-    
     public $incrementing = true;
     protected $keyType = 'int';
 
@@ -35,24 +32,15 @@ class Student extends Model
         'address',
         'guardian_name',
         'guardian_contact',
-        // Removed 'program' field from fillable array as it is now derived from 'program_id'
     ];
 
-    /**
-     * Get the incident reports associated with the student.
-     */
     public function incidents(): HasMany
     {
-        // student_id (FK on incidents table) links to student_number (Unique Key on students table)
         return $this->hasMany(Incident::class, 'student_id', 'student_number');
     }
 
-    /**
-     * Get the program the student belongs to.
-     */
     public function program(): BelongsTo
     {
-        // program_id (FK on students table) links to id (PK on programs table)
         return $this->belongsTo(Program::class, 'program_id');
     }
 }

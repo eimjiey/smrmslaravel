@@ -20,7 +20,6 @@ class Certificate extends Model
         'date_of_incident',
         'disciplinary_action',
         'status',
-        // REMOVED: 'student_name' field as it doesn't exist in the database
         'school_name',
         'school_location',
         'official_name',

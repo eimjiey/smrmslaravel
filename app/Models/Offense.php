@@ -12,21 +12,13 @@ class Offense extends Model
     use HasFactory;
     protected $table = 'offenses';
 
-    /**
-     * Get the category this offense belongs to.
-     */
     public function category(): BelongsTo
     {
-        // category_id (FK on offenses table) links to id (PK on offense_categories table)
         return $this->belongsTo(OffenseCategory::class, 'category_id');
     }
 
-    /**
-     * Get the incidents associated with this specific offense.
-     */
     public function incidents(): HasMany
     {
-        // The incidents table uses 'specific_offense_id' as the foreign key
         return $this->hasMany(Incident::class, 'specific_offense_id');
     }
 }

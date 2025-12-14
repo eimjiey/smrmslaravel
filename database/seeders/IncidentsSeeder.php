@@ -9,29 +9,24 @@ class IncidentsSeeder extends Seeder
 {
     public function run(): void
     {
-        // 1. Fetch data for lookups
         $students = DB::table('students')->get();
         if ($students->isEmpty()) {
             echo "Warning: No students found in the 'students' table. Skipping IncidentsSeeder.\n";
             return;
         }
 
-        // --- LOOKUPS for Offense IDs ---
-        // Assuming your 'offense_categories' table has a 'name' column.
         $categoryIds = DB::table('offense_categories')->pluck('id', 'name')->toArray();
         if (empty($categoryIds)) {
-             echo "Error: OffenseCategorySeeder must be run before IncidentsSeeder.\n";
-             return;
-        }
-        
-        // Assuming your 'offenses' table has a 'name' column.
-        $offenseIds = DB::table('offenses')->pluck('id', 'name')->toArray();
-        if (empty($offenseIds)) {
-             echo "Error: OffensesSeeder must be run before IncidentsSeeder.\n";
-             return;
+            echo "Error: OffenseCategorySeeder must be run before IncidentsSeeder.\n";
+            return;
         }
 
-        // 2. Define data pools for random selection (using names for selection logic)
+        $offenseIds = DB::table('offenses')->pluck('id', 'name')->toArray();
+        if (empty($offenseIds)) {
+            echo "Error: OffensesSeeder must be run before IncidentsSeeder.\n";
+            return;
+        }
+
         $minorOffenses = [
             'Failure to wear uniform', 'Pornographic materials', 'Littering', 'Loitering',
             'Eating in restricted areas', 'Unauthorized use of school facilities',
@@ -54,7 +49,6 @@ class IncidentsSeeder extends Seeder
         $statuses = ['Pending', 'Investigation', 'Resolved', 'Closed'];
         $months = ['2025-08', '2025-09', '2025-10', '2025-11', '2025-12'];
 
-        // 3. Loop through months to generate incident data
         foreach ($months as $month) {
             $incidentsPerMonth = rand(5, 10);
 
@@ -64,8 +58,7 @@ class IncidentsSeeder extends Seeder
                 $specificOffenseName = $offenseCategoryName === 'Minor Offense'
                     ? $minorOffenses[array_rand($minorOffenses)]
                     : $majorOffenses[array_rand($majorOffenses)];
-                
-                // --- ID ASSIGNMENTS ---
+
                 $categoryId = $categoryIds[$offenseCategoryName] ?? null;
                 $specificOffenseId = $offenseIds[$specificOffenseName] ?? null;
 
@@ -74,20 +67,16 @@ class IncidentsSeeder extends Seeder
                 $status = $statuses[array_rand($statuses)];
 
                 DB::table('incidents')->insert([
-                    'student_id'        => $student->student_number,
-                    
-                    'date_of_incident'  => $date,
-                    'time_of_incident'  => now()->setTime(rand(7, 17), rand(0, 59))->format('H:i:s'),
-                    'location'          => $locations[array_rand($locations)],
-                    
-                    // FIXED: Inserting IDs with correct foreign key names
-                    'category_id'       => $categoryId, 
-                    'specific_offense_id' => $specificOffenseId, 
-                    
-                    'description'       => "Student ({$student->student_number}) was reported for: {$specificOffenseName}. Incident occurred at {$locations[array_rand($locations)]}.",
-                    'status'            => $status,
-                    'created_at'        => now(),
-                    'updated_at'        => now(),
+                    'student_id'         => $student->student_number,
+                    'date_of_incident'   => $date,
+                    'time_of_incident'   => now()->setTime(rand(7, 17), rand(0, 59))->format('H:i:s'),
+                    'location'           => $locations[array_rand($locations)],
+                    'category_id'        => $categoryId,
+                    'specific_offense_id'=> $specificOffenseId,
+                    'description'        => "Student ({$student->student_number}) was reported for: {$specificOffenseName}. Incident occurred at {$locations[array_rand($locations)]}.",
+                    'status'             => $status,
+                    'created_at'         => now(),
+                    'updated_at'         => now(),
                 ]);
             }
         }

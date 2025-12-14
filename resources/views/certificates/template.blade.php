@@ -4,15 +4,14 @@
     <meta charset="utf-8">
     <title>Certificate of Student Misconduct Record</title>
     <style>
-        /* A4 Landscape Dimensions */
         @page {
             size: A4 landscape;
-            margin: 0; /* Important: removes default PDF margins */
+            margin: 0;
         }
         
         html, body {
-            width: 297mm; /* A4 width for landscape */
-            height: 210mm; /* A4 height for landscape */
+            width: 297mm;
+            height: 210mm;
             margin: 0;
             padding: 0;
             font-family: 'Arial', sans-serif;
@@ -20,13 +19,13 @@
         }
 
         .certificate-container {
-            width: 277mm; /* Total width minus padding (297mm - 10mm*2) */
-            height: 190mm; /* Total height minus padding (210mm - 10mm*2) */
+            width: 277mm;
+            height: 190mm;
             padding: 10mm; 
             margin: 0 auto;
             text-align: left;
             box-sizing: border-box;
-            border: 2px solid #333; /* Simple border for professional look */
+            border: 2px solid #333;
         }
 
         .header {
@@ -40,7 +39,7 @@
             text-decoration: underline;
             margin-top: 10px;
             margin-bottom: 30px;
-            color: #CC0000; /* Use a distinct color for this type of record */
+            color: #CC0000;
         }
 
         .content-block {
