@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 class IncidentController extends Controller
 {
@@ -26,7 +27,6 @@ class IncidentController extends Controller
         ],
         'Major Offense' => [
             1 => 'Suspension from five (5) to ten (10) days or Community Service, as determined by the Office of Student Affairs and Services.',
-            2 => 'Suspension from eleven (11) to fifteen (15) days.',
             2 => 'Suspension from eleven (11) to fifteen (15) days.',
             3 => 'Suspension up to forty-five (45) calendar days to dismissal depending upon the gravity of the offense after due process.',
         ],
@@ -142,6 +142,8 @@ class IncidentController extends Controller
         if (!Auth::check()) {
             return response()->json(['message' => 'Unauthenticated.'], 401);
         }
+        
+        DB::beginTransaction();
 
         try {
             $validatedData = $request->validate([
@@ -173,6 +175,7 @@ class IncidentController extends Controller
             $studentIdInput = $validatedData['student_id'];
             $student = Student::where('student_number', $studentIdInput)->first();
             if (!$student) {
+                DB::rollBack(); 
                 return response()->json([
                     'message' => 'The given data was invalid.',
                     'errors' => [
@@ -183,6 +186,7 @@ class IncidentController extends Controller
 
             $offenseCategory = OffenseCategory::where('name', $validatedData['offenseCategory'])->first();
             if (!$offenseCategory) {
+                DB::rollBack();
                 return response()->json([
                     'message' => 'The given data was invalid.',
                     'errors' => ['offenseCategory' => ['Invalid offense category provided.']]
@@ -194,6 +198,8 @@ class IncidentController extends Controller
                 ->first();
 
             if (!$specificOffense) {
+
+                DB::rollBack();
                 return response()->json([
                     'message' => 'The given data was invalid.',
                     'errors' => ['specificOffense' => ['Invalid specific offense provided for the selected category.']]
@@ -218,12 +224,15 @@ class IncidentController extends Controller
                 'disciplinary_action' => $recommendation,
             ]);
 
+            DB::commit();
+
             return response()->json([
                 'message' => 'Incident report filed successfully.',
                 'incident' => $incident,
                 'recommendation' => $recommendation
             ], 201);
         } catch (ValidationException $e) {
+            DB::rollBack(); 
             $errorMap = [];
             foreach ($e->errors() as $key => $messages) {
                 $errorMap[Str::camel($key)] = $messages;
@@ -233,6 +242,7 @@ class IncidentController extends Controller
                 'errors' => $errorMap
             ], 422);
         } catch (\Exception $e) {
+            DB::rollBack(); 
             Log::error('Store Incident Error: ' . $e->getMessage());
             return response()->json([
                 'message' => 'An error occurred while filing the report.',
